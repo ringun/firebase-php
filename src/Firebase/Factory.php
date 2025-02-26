@@ -21,6 +21,7 @@ use Google\Cloud\Storage\StorageClient;
 use GuzzleHttp\Client;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\MessageFormatter;
+use GuzzleHttp\Psr7\HttpFactory;
 use GuzzleHttp\Psr7\Utils as GuzzleUtils;
 use GuzzleHttp\RequestOptions;
 use Kreait\Firebase\Auth\ApiClient;
@@ -87,11 +88,13 @@ final class Factory
     /** @var callable|null */
     private $databaseAuthVariableOverrideMiddleware;
     private ?string $tenantId = null;
+    private HttpFactory $httpFactory;
     private HttpClientOptions $httpClientOptions;
 
     public function __construct()
     {
         $this->clock = SystemClock::create();
+        $this->httpFactory = new HttpFactory();
         $this->verifierCache = new MemoryCacheItemPool();
         $this->authTokenCache = new MemoryCacheItemPool();
         $this->httpClientOptions = HttpClientOptions::default();
@@ -298,9 +301,10 @@ final class Factory
         $errorHandler = new MessagingApiExceptionConverter($this->clock);
 
         $messagingApiClient = new Messaging\ApiClient(
-            $this->createApiClient([
-                'base_uri' => 'https://fcm.googleapis.com/v1/projects/'.$projectId,
-            ]),
+            $this->createApiClient(),
+            $projectId,
+            $this->httpFactory,
+            $this->httpFactory,
             $errorHandler,
         );
 
@@ -314,7 +318,7 @@ final class Factory
             $errorHandler,
         );
 
-        return new Messaging($projectId, $messagingApiClient, $appInstanceApiClient);
+        return new Messaging($messagingApiClient, $appInstanceApiClient);
     }
 
     /**
@@ -446,22 +450,9 @@ final class Factory
     public function createApiClient(?array $config = null, ?array $middlewares = null): Client
     {
         $config ??= [];
+        $middlewares ??= [];
 
-        if ($proxy = $this->httpClientOptions->proxy()) {
-            $config[RequestOptions::PROXY] = $proxy;
-        }
-
-        if ($connectTimeout = $this->httpClientOptions->connectTimeout()) {
-            $config[RequestOptions::CONNECT_TIMEOUT] = $connectTimeout;
-        }
-
-        if ($readTimeout = $this->httpClientOptions->readTimeout()) {
-            $config[RequestOptions::READ_TIMEOUT] = $readTimeout;
-        }
-
-        if ($totalTimeout = $this->httpClientOptions->timeout()) {
-            $config[RequestOptions::TIMEOUT] = $totalTimeout;
-        }
+        $config = [...$this->httpClientOptions->guzzleConfig(), ...$config];
 
         $handler = HandlerStack::create();
 
@@ -473,29 +464,27 @@ final class Factory
             $handler->push($this->httpDebugLogMiddleware, 'http_debug_logs');
         }
 
-        if ($middlewares !== null) {
-            foreach ($middlewares as $middleware) {
-                $handler->push($middleware);
-            }
+        foreach ($this->httpClientOptions->guzzleMiddlewares() as $middleware) {
+            $handler->push($middleware['middleware'], $middleware['name']);
+        }
+
+        foreach ($middlewares as $middleware) {
+            $handler->push($middleware);
         }
 
         $credentials = $this->getGoogleAuthTokenCredentials();
 
-        if (!($credentials instanceof FetchAuthTokenInterface) && $this->discoveryIsDisabled) {
+        if (!$credentials instanceof FetchAuthTokenInterface) {
             throw new RuntimeException('Unable to create an API client without credentials');
         }
 
-        if ($credentials !== null) {
-            $projectId = $credentials instanceof ProjectIdProviderInterface ? $credentials->getProjectId() : $this->getProjectId();
-            $cachePrefix = 'kreait_firebase_'.$projectId;
+        $projectId = $this->getProjectId();
+        $cachePrefix = 'kreait_firebase_'.$projectId;
 
-            $credentials = new FetchAuthTokenCache($credentials, ['prefix' => $cachePrefix], $this->authTokenCache);
-            $authTokenHandler = HttpHandlerFactory::build(new Client($config));
+        $credentials = new FetchAuthTokenCache($credentials, ['prefix' => $cachePrefix], $this->authTokenCache);
+        $authTokenHandler = HttpHandlerFactory::build(new Client($config));
 
-            $handler->push(new AuthTokenMiddleware($credentials, $authTokenHandler));
-        }
-
-        $handler->push(Middleware::responseWithSubResponses());
+        $handler->push(new AuthTokenMiddleware($credentials, $authTokenHandler));
 
         $config['handler'] = $handler;
         $config['auth'] = 'google_auth';

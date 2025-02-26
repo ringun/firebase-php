@@ -242,6 +242,11 @@ final class CloudMessage implements Message
         return $this->target->type() !== MessageTarget::UNKNOWN;
     }
 
+    public function target(): MessageTarget
+    {
+        return $this->target;
+    }
+
     /**
      * @return array<string, mixed>
      */

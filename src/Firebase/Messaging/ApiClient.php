@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace Kreait\Firebase\Messaging;
 
+use Beste\Json;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Promise\PromiseInterface;
 use Kreait\Firebase\Exception\FirebaseException;
 use Kreait\Firebase\Exception\MessagingApiExceptionConverter;
 use Kreait\Firebase\Exception\MessagingException;
+use Psr\Http\Message\RequestFactoryInterface;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\StreamFactoryInterface;
 use Throwable;
 
 /**
@@ -21,10 +24,47 @@ class ApiClient
     private ClientInterface $client;
     private MessagingApiExceptionConverter $errorHandler;
 
-    public function __construct(ClientInterface $client, MessagingApiExceptionConverter $errorHandler)
-    {
+    private string $projectId;
+    private RequestFactoryInterface $requestFactory;
+    private StreamFactoryInterface $streamFactory;
+
+
+    public function __construct(
+        ClientInterface $client,
+        string $projectId,
+        RequestFactoryInterface $requestFactory,
+        StreamFactoryInterface $streamFactory,
+        MessagingApiExceptionConverter $errorHandler
+    ) {
+        $this->projectId = $projectId;
+        $this->requestFactory = $requestFactory;
+        $this->streamFactory = $streamFactory;
         $this->client = $client;
         $this->errorHandler = $errorHandler;
+    }
+
+    public function createSendRequestForMessage(Message $message, bool $validateOnly): RequestInterface
+    {
+        $request = $this->requestFactory
+            ->createRequest(
+                'POST',
+                'https://fcm.googleapis.com/v1/projects/'.$this->projectId.'/messages:send',
+            )
+        ;
+
+        $payload = ['message' => $message];
+
+        if ($validateOnly === true) {
+            $payload['validate_only'] = true;
+        }
+
+        $body = $this->streamFactory->createStream(Json::encode($payload));
+
+        return $request
+            ->withBody($body)
+            ->withHeader('Content-Type', 'application/json; charset=UTF-8')
+            ->withHeader('Content-Length', (string) $body->getSize())
+            ;
     }
 
     /**
