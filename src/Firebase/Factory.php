@@ -454,7 +454,7 @@ final class Factory
 
         $config = array_merge($this->httpClientOptions->guzzleConfig(), $config);
 
-        $handler = HandlerStack::create();
+        $handler = HandlerStack::create(); // test
 
         if ($this->httpLogMiddleware) {
             $handler->push($this->httpLogMiddleware, 'http_logs');
