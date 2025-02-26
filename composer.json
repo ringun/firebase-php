@@ -28,7 +28,7 @@
         "ext-json": "*",
         "ext-mbstring": "*",
         "ext-openssl": "*",
-        "beste/clock": "^3.0",
+        "beste/clock": "^2.1.0",
         "beste/json": "^1.2.1",
         "fig/http-message-util": "^1.1.5",
         "firebase/php-jwt": "^6.3.2",
